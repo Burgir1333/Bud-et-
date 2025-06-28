@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Budżet Domowy</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f4f7fa;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+    header {
+      background-color: #4CAF50;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      font-size: 1.8rem;
+    }
+    main {
+      padding: 1.5rem;
+      max-width: 800px;
+      margin: auto;
+    }
+    section {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 1.5rem;
+    }
+    h2 {
+      margin-top: 0;
+      color: #4CAF50;
+    }
+    input, select, button {
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .summary {
+      font-weight: bold;
+      margin-top: 1rem;
+    }
+    .goal-status {
+      margin-top: 1rem;
+      font-style: italic;
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <header>Budżet Domowy</header>
+  <main>
+    <section>
+      <h2>Ustal datę</h2>
+      <input type="month" id="date-from">
+    </section>
+
+    <section>
+      <h2>Budżet miesięczny</h2>
+      <input type="number" id="monthly-budget" placeholder="Ustal budżet na miesiąc (zł)">
+      <div class="summary">
+        Wydano: <span id="spent-amount">0</span> zł<br>
+        Pozostało: <span id="remaining-amount">0</span> zł
+      </div>
+    </section>
+
+    <section>
+      <h2>Dodaj wydatek</h2>
+      <form id="expense-form">
+        <input type="number" id="expense-amount" placeholder="Kwota">
+        <select id="expense-category"></select>
+        <input type="text" id="expense-description" placeholder="Opis">
+        <button type="submit">Dodaj</button>
+      </form>
+      <table id="expenses-table">
+        <tbody id="expenses-tbody"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Kategorie</h2>
+      <input type="text" id="new-category" placeholder="Nowa kategoria">
+      <button onclick="addCategory()">Dodaj kategorię</button>
+      <div id="categories-list"></div>
+    </section>
+
+    <section>
+      <h2>Cel budżetowy</h2>
+      <input type="number" id="goal-target" placeholder="Wprowadź cel końcowy (zł)">
+      <div class="summary">
+        Zaoszczędzono: <span id="goal-current">0</span> zł<br>
+        Pozostało: <span id="goal-remaining">0</span> zł
+      </div>
+      <input type="number" id="goal-change" placeholder="Kwota zmiany">
+      <button onclick="changeGoalAmount(true)">Dodaj</button>
+      <button onclick="changeGoalAmount(false)">Odejmij</button>
+    </section>
+
+    <section>
+      <h2>Kategoria "Niespodziewane"</h2>
+      <div class="summary">
+        Zebrano: <span id="unexpected-total">0</span> zł
+      </div>
+      <input type="number" id="unexpected-change" placeholder="Kwota zmiany">
+      <button onclick="changeUnexpectedAmount(true)">Dodaj</button>
+      <button onclick="changeUnexpectedAmount(false)">Odejmij</button>
+    </section>
+  </main>
+
+  <script>
+    let expenses = [];
+    let categories = JSON.parse(localStorage.getItem('categories')) || ['Jedzenie', 'Transport', 'Rozrywka'];
+    let selectedDateKey = null;
+    let goalTarget = parseFloat(localStorage.getItem('goalTarget')) || 0;
+    let goalCurrent = parseFloat(localStorage.getItem('goalCurrent')) || 0;
+    let unexpectedTotal = parseFloat(localStorage.getItem('unexpectedTotal')) || 0;
+
+    const dateFromInput = document.getElementById('date-from');
+    const monthlyBudgetInput = document.getElementById('monthly-budget');
+    const spentAmountEl = document.getElementById('spent-amount');
+    const remainingAmountEl = document.getElementById('remaining-amount');
+
+    const expenseForm = document.getElementById('expense-form');
+    const expenseAmountInput = document.getElementById('expense-amount');
+    const expenseCategorySelect = document.getElementById('expense-category');
+    const expenseDescriptionInput = document.getElementById('expense-description');
+    const expensesTbody = document.getElementById('expenses-tbody');
+
+    const goalTargetInput = document.getElementById('goal-target');
+    const goalCurrentEl = document.getElementById('goal-current');
+    const goalRemainingEl = document.getElementById('goal-remaining');
+
+    const newCategoryInput = document.getElementById('new-category');
+    const categoriesList = document.getElementById('categories-list');
+
+    const unexpectedTotalEl = document.getElementById('unexpected-total');
+
+    function getDateKey(date) {
+      const d = new Date(date);
+      return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+    }
+
+    function loadExpensesForDate() {
+      if (!selectedDateKey) return;
+      const data = JSON.parse(localStorage.getItem('expensesByDate')) || {};
+      expenses = data[selectedDateKey] || [];
+      const budgetData = JSON.parse(localStorage.getItem('budgets')) || {};
+      monthlyBudgetInput.value = budgetData[selectedDateKey] || '';
+      renderExpenses();
+      updateSummary();
+    }
+
+    function saveExpensesForDate() {
+      if (!selectedDateKey) return;
+      const data = JSON.parse(localStorage.getItem('expensesByDate')) || {};
+      data[selectedDateKey] = expenses;
+      localStorage.setItem('expensesByDate', JSON.stringify(data));
+    }
+
+    function updateSummary() {
+      const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const budget = parseFloat(monthlyBudgetInput.value) || 0;
+      spentAmountEl.textContent = total.toFixed(2);
+      remainingAmountEl.textContent = (budget - total).toFixed(2);
+    }
+
+    function updateGoalDisplay() {
+      goalTargetInput.value = goalTarget;
+      goalCurrentEl.textContent = goalCurrent.toFixed(2);
+      goalRemainingEl.textContent = (goalTarget - goalCurrent).toFixed(2);
+    }
+
+    function updateUnexpectedDisplay() {
+      unexpectedTotalEl.textContent = unexpectedTotal.toFixed(2);
+    }
+
+    function changeUnexpectedAmount(isAdd) {
+      const input = parseFloat(document.getElementById('unexpected-change').value);
+      if (!isNaN(input)) {
+        unexpectedTotal = isAdd ? unexpectedTotal + input : unexpectedTotal - input;
+        unexpectedTotal = Math.max(0, unexpectedTotal);
+        localStorage.setItem('unexpectedTotal', unexpectedTotal);
+        updateUnexpectedDisplay();
+      }
+    }
+
+    expenseForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const amount = parseFloat(expenseAmountInput.value);
+      const category = expenseCategorySelect.value;
+      const description = expenseDescriptionInput.value.trim();
+      if (isNaN(amount) || amount <= 0 || !category) return;
+      expenses.push({ amount, category, description });
+      if (category === 'Niespodziewane') {
+        unexpectedTotal += amount;
+        localStorage.setItem('unexpectedTotal', unexpectedTotal);
+        updateUnexpectedDisplay();
+      }
+      saveExpensesForDate();
+      renderExpenses();
+      updateSummary();
+      expenseForm.reset();
+    });
+
+    expensesTbody.addEventListener('click', e => {
+      if (e.target.tagName === 'BUTTON') {
+        const idx = parseInt(e.target.dataset.index);
+        if (!isNaN(idx)) {
+          expenses.splice(idx, 1);
+          saveExpensesForDate();
+          renderExpenses();
+          updateSummary();
+        }
+      }
+    });
+
+    dateFromInput.addEventListener('change', () => {
+      selectedDateKey = getDateKey(dateFromInput.value);
+      loadExpensesForDate();
+    });
+
+    monthlyBudgetInput.addEventListener('change', () => {
+      const data = JSON.parse(localStorage.getItem('budgets')) || {};
+      data[selectedDateKey] = parseFloat(monthlyBudgetInput.value);
+      localStorage.setItem('budgets', JSON.stringify(data));
+      updateSummary();
+    });
+
+    function renderExpenses() {
+      expensesTbody.innerHTML = '';
+      expenses.forEach((e, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${e.amount} zł</td><td>${e.category}</td><td>${e.description}</td><td><button data-index="${i}">Usuń</button></td>`;
+        expensesTbody.appendChild(tr);
+      });
+    }
+
+    function renderCategories() {
+      expenseCategorySelect.innerHTML = '';
+      categories.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        expenseCategorySelect.appendChild(opt);
+      });
+
+      categoriesList.innerHTML = '';
+      categories.forEach(c => {
+        const div = document.createElement('div');
+        div.innerHTML = `${c} <button onclick="removeCategory('${c}')">Usuń</button>`;
+        categoriesList.appendChild(div);
+      });
+    }
+
+    function addCategory() {
+      const newCat = newCategoryInput.value.trim();
+      if (newCat && !categories.includes(newCat)) {
+        categories.push(newCat);
+        localStorage.setItem('categories', JSON.stringify(categories));
+        renderCategories();
+        newCategoryInput.value = '';
+      }
+    }
+
+    function removeCategory(cat) {
+      categories = categories.filter(c => c !== cat);
+      localStorage.setItem('categories', JSON.stringify(categories));
+      renderCategories();
+    }
+
+    function changeGoalAmount(isAdd) {
+      const change = parseFloat(document.getElementById('goal-change').value);
+      if (!isNaN(change)) {
+        goalCurrent = isAdd ? goalCurrent + change : goalCurrent - change;
+        goalCurrent = Math.max(0, goalCurrent);
+        localStorage.setItem('goalCurrent', goalCurrent);
+        updateGoalDisplay();
+      }
+    }
+
+    goalTargetInput.addEventListener('change', () => {
+      goalTarget = parseFloat(goalTargetInput.value) || 0;
+      localStorage.setItem('goalTarget', goalTarget);
+      updateGoalDisplay();
+    });
+
+    function init() {
+      renderCategories();
+      if (dateFromInput.value) {
+        selectedDateKey = getDateKey(dateFromInput.value);
+        loadExpensesForDate();
+      }
+      updateGoalDisplay();
+      updateUnexpectedDisplay();
+    }
+
+    init();
+  </script>
+</body>
+</html>
